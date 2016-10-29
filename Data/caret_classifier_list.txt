@@ -1,0 +1,6 @@
+rf
+svmLinear
+svmPoly
+avNNet
+lda2
+multinom

@@ -5,7 +5,10 @@ library(dplyr)
 library(caret)
 
 # Read input
-input <- read.csv(file = "./student/student-mat.csv",header = TRUE,sep = ";")
+input <- read.csv(file = "./Data/student/student-mat.csv",header = TRUE,sep = ";")
+
+# Read list of classifiers to try
+classifiers <- readLines(con = "./Data/caret_classifier_list.txt")
 
 # Check for NA
 sum(is.na(input))
@@ -27,30 +30,47 @@ for (att in colnames(input)){
 
 glimpse(input)
 
-# ## Using k-fold cross validation
-# k <- 5
-# ## Assigning ids to each sample
-# input$id <- sample(1:k,nrow(input),replace = TRUE)
-# klist <- 1:k
-# 
-# ## Create empty data frames for predicted and testset values
-# 
-# predicted <- data.frame()
-# testset <- data.frame()
-
 # Partition data into test and train
 
 inTrain <- createDataPartition(input$Dalc,p = 0.75,list = FALSE)
 training <- input[inTrain,]
 testing <- input[-inTrain,]
 
-
-
+# Set response variable for model
+response <- "Dalc"
 train_control <- trainControl(method = "cv",number = 10,savePredictions = TRUE)
 # Set seed to control for resampling and generate reproducible results
 set.seed(seed = 123)
+# Create empty final accuracy list
+model_output <- list()
+accuracy_df <- data.frame(classifiers,0) 
+colnames(accuracy_df) <- c("model","accuracy")
+# Call model builder for each classifier
+# Add progress bar
+for (classifier in classifiers){
+  print(paste0("Building model for: ",classifier))
+  #   Build the model
+  model <- buildModel(response,classifier)
+  print(paste0("Completed model for: ",classifier))
+  
+  print(paste0("Predicting using ",classifier,"..."))
+  # Predict using test data
+  modelfit <- predict.train(model,newdata = testing)
+  # Generate confusion matrix for comparison and accuracy
+  cMat <- confusionMatrix(data = modelfit,testing$Dalc)
+  #   model_output[[classifier]] <- list(cMat$overall[1])
+  accuracy_df[accuracy_df$model==classifier,"accuracy"] <- round(cMat$overall[1],digits = 3)
+  model_output[[classifier]] <- list(unlist(model_output[[classifier]]),cMat$table)
+  print(paste0("Completed prediction using ",classifier))
+}
+model_output[["model_accuracy"]] <- accuracy_df
+best_model <- as.character(accuracy_df[accuracy_df$accuracy==max(accuracy_df$accuracy),"model"])
+print(paste0("Highest accuracy achieved with: ",best_model))
+# Need to check confusion matrix display
+print(paste0("Confusion matrix for ",best_model,": ",model_output[[best_model]][2]))
 
-modelrf <- train(training$Dalc~.,data = training,trControl = train_control,method = "rf")
+
+modelrf <- train(Dalc~.,data = training,trControl = train_control,method = "rf")
 # modellinsvm <- train(training$Dalc~.,data = training,trControl = train_control,method = "lssvmLinear")
 # modelpolysvm <- train(training$Dalc~.,data = training,trControl = train_control,method = "lssvmPoly")
 # modelradsvm <- train(training$Dalc~.,data = training,trControl = train_control,method = "lssvmRadial")
@@ -146,22 +166,18 @@ confusionMatrix(data = ldafit,testing$Walc)
 
 mnomfit <- predict.train(modelmnom,newdata = testing)
 confusionMatrix(data = mnomfit,testing$Walc)
-regressor<- "Dalc"
+response <- "Dalc"
+classifier <- "rf"
 
-function classify(regressor){
+buildModel <- function(response,classifier){
+  #   Setting train control for 10 fold cross validation
   train_control <- trainControl(method = "cv",number = 10,savePredictions = TRUE)
   # Set seed to control for resampling and generate reproducible results
   set.seed(seed = 123)
-  modelrf <- train(training[,regressor]~.,data = training,trControl = train_control,method = "rf")
-#   modelrf <- train(Dalc~.,data = training,trControl = train_control,method = "rf")
-  # modellinsvm <- train(training$Dalc~.,data = training,trControl = train_control,method = "lssvmLinear")
-  # modelpolysvm <- train(training$Dalc~.,data = training,trControl = train_control,method = "lssvmPoly")
-  # modelradsvm <- train(training$Dalc~.,data = training,trControl = train_control,method = "lssvmRadial")
-  modellinsvm <- train(training$Dalc~.,data = training,trControl = train_control,method = "svmLinear")
-  modelpolysvm <- train(training$Dalc~.,data = training,trControl = train_control,method = "svmPoly")
-  # modelradsvm <- train(training$Dalc~.,data = training,trControl = train_control,method = "svmRadial")
-  modelnnet <- train(training$Dalc~.,data = training,trControl = train_control,method = "avNNet")
-  modellda <- train(training$Dalc~.,data = training,trControl = train_control,method = "lda2")
-  modelmnom <- train(training$Dalc~.,data = training,trControl = train_control,method = "multinom")
-  # modelxgbLin <- train(training$Dalc~.,data = training,trControl = train_control,method = "xgbLinear")
+  #   build model on response for selected classifier
+  fmla <- as.formula(paste0(response,"~."))
+  #   built_model <- train(training[,response]~.,data = training,trControl = train_control,method = classifier)
+  #   built_model <- train(training[,response]~training[,!names(training) %in% response],trControl = train_control,method = classifier)
+  built_model <- train(fmla,data = training,trControl = train_control,method = classifier)
+  return(built_model)
 }
