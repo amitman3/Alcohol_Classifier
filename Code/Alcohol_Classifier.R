@@ -73,8 +73,11 @@ print.data.frame(accuracy_df[order(accuracy_df$accuracy,decreasing = TRUE),])
 best_model <- as.character(accuracy_df[accuracy_df$accuracy==max(accuracy_df$accuracy),"model"][1])
 print(paste0("Highest accuracy achieved with: ",best_model))
 # Need to check confusion matrix display
-print(paste0("Confusion matrix for ",best_model,": ",model_output[[best_model]][2]))
+print(paste0("Confusion matrix for ",best_model,": "))
+print(model_output[[best_model]][2])
 
+# =========================================================================================================
+# Function to build model for selected response variable and type of classifier
 buildModel <- function(response,classifier){
   #   Setting train control for 10 fold cross validation
   train_control <- trainControl(method = "cv",number = 10,savePredictions = TRUE)
@@ -82,8 +85,6 @@ buildModel <- function(response,classifier){
   set.seed(seed = 123)
   #   build model on response for selected classifier
   fmla <- as.formula(paste0(response,"~."))
-  #   built_model <- train(training[,response]~.,data = training,trControl = train_control,method = classifier)
-  #   built_model <- train(training[,response]~training[,!names(training) %in% response],trControl = train_control,method = classifier)
   built_model <- train(fmla,data = training,trControl = train_control,method = classifier)
   return(built_model)
 }
