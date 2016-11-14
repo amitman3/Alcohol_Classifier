@@ -3,6 +3,7 @@ library(ggplot2)
 library(plyr)
 library(dplyr)
 library(caret)
+library(doParallel)
 
 # Read input
 input <- read.csv(file = "./Data/student/student-mat.csv",header = TRUE,sep = ";")
@@ -40,18 +41,21 @@ testing <- input[-inTrain,]
 
 # Set response variable for model
 response <- "Dalc"
+tuneLen <- 5
+parallelism <- TRUE
 
 # Create empty final accuracy list
 model_output <- list()
 accuracy_df <- data.frame(classifiers,0) 
 colnames(accuracy_df) <- c("model","accuracy")
-
+pb <- txtProgressBar(min = 0,max = length(classifiers),style = 3)
 # Call model builder for each classifier
-# Add progress bar
+# Start timer
+start <- proc.time()
 for (classifier in classifiers){
   print(paste0("Building model for: ",classifier))
   #   Build the model
-  model <- buildModel(response,classifier)
+  model <- buildModel(response,classifier,tuneLen,parallelism)
   print(paste0("Completed model for: ",classifier))
   
   print(paste0("Predicting using ",classifier,"..."))
@@ -63,7 +67,11 @@ for (classifier in classifiers){
   accuracy_df[accuracy_df$model==classifier,"accuracy"] <- round(cMat$overall[1],digits = 3)
   model_output[[classifier]] <- list(unlist(model_output[[classifier]]),cMat$table)
   print(paste0("Completed prediction using ",classifier))
+  setTxtProgressBar(pb = pb,value = match(classifier,classifiers),title = "Progress")
 }
+# Stop timer
+end <- proc.time() - start
+print(paste0("Time requried: ",end[3]))
 model_output[["model_accuracy"]] <- accuracy_df
 # Display accuracies of model in decreasing order
 print(paste0("Accuracy Table: "))
@@ -78,13 +86,24 @@ print(model_output[[best_model]][2])
 
 # =========================================================================================================
 # Function to build model for selected response variable and type of classifier
-buildModel <- function(response,classifier){
+
+buildModel <- function(response,classifier,tuneLen,parallelism){
+  if(parallelism==TRUE){
+    #   Set up number of parallel executors - Number of cores - 1 (Safety buffer so the machine doesn't hang up)
+    cl <- makeCluster(detectCores()-1)
+    registerDoParallel(cl = cl)  
+  }
+  
   #   Setting train control for 10 fold cross validation
   train_control <- trainControl(method = "cv",number = 10,savePredictions = TRUE)
   # Set seed to control for resampling and generate reproducible results
   set.seed(seed = 123)
   #   build model on response for selected classifier
   fmla <- as.formula(paste0(response,"~."))
-  built_model <- train(fmla,data = training,trControl = train_control,method = classifier)
+  built_model <- train(fmla,data = training,trControl = train_control,method = classifier,tuneLength = tuneLen)
+  if(parallelism==TRUE){
+    stopCluster(cl = cl)
+  }
+  
   return(built_model)
 }
