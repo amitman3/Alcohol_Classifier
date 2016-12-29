@@ -4,6 +4,10 @@ library(plyr)
 library(dplyr)
 library(caret)
 library(doParallel)
+library(Matrix)
+library(ROCR)
+library(ROSE)
+library(DMwR)
 
 # Read input
 input <- read.csv(file = "./Data/student/student-mat.csv",header = TRUE,sep = ";")
@@ -31,6 +35,8 @@ for (att in colnames(input)){
   }
 }
 
+# Scatterplot matrix of numeric attributes
+featurePlot(x = training[,c(3,15,30:33)],y = training[,27],plot = "pairs")
 glimpse(input)
 
 # Partition data into test and train
@@ -41,6 +47,53 @@ testing <- input[-inTrain,]
 
 # Set response variable for model
 response <- "Dalc"
+fmla <- as.formula(paste0(response,"~."))
+class_imbal <- FALSE
+# Trying to handle imbalanced classification by over, under and synthetic sampling using SMOTE and ROSE
+# Under sampling
+train_down <- downSample(x = training[,!colnames(training) %in% response],y = training[,response],yname = response)
+# Over sampling
+train_up <- upSample(x = training[,!colnames(training) %in% response],y = training[,response],yname = response)
+
+table_response <- table(training[,response])
+class_major <- names(table_response)[which(table_response %in% max(table_response))]
+imbal_test <- (max(table_response)/nrow(training))*length(table_response)
+if(imbal_test>1.2){
+  cat("Class Imbalance Detected!\nClass",class_major,"dominating the overall class representation.")
+  class_imbal <- TRUE
+}
+
+minor_class_list <- names(table_response[!names(table_response) %in% class_major])
+paired_subsets <- sapply(X = paste(minor_class_list,class_major,sep = "_"),simplify = FALSE,USE.NAMES=TRUE, function(z) {
+  subset_name <- paste0("sub_",class_major,z)
+  #   paste0(subset_name) <- training[training[,response] %in% c(class_major,z),]
+  #   assign(paste(subset_name),training[training[,response] %in% c(class_major,z),])
+  min <-strsplit(x = z,split = "_",fixed = TRUE)[[1]][1]
+  subset <- training[training[,response] %in% c(class_major,min),]
+  subset[,response] <- as.factor(as.character(subset[,response]))
+  return(subset)
+})
+
+# SMOTE sampling
+# sub_12 <- training[training[,response] %in% c(1,2),]
+# sub_12[,response] <- as.character(sub_12[,response])
+# sub_12[,response] <- as.factor(sub_12[,response])
+set.seed(123)
+train_smote12 <- SMOTE(form = fmla,data = sub_12,perc.over = 150,k = 5,perc.under = 300)
+
+set.seed(123)
+train_smotebc <- SMOTE(form = fmla,data = sub_bc,perc.over = 400,k = 5,perc.under = 160)
+
+train_smote <- rbind(train_smoteac,train_smotebc)
+
+# ROSE sampling
+set.seed(123)
+train_roseac <- ROSE(formula = fmla,data = sub_ac,p = 0.4)
+train_rosebc <- ROSE(formula = fmla,data = sub_bc,p = 0.4)
+train_rose <- rbind(train_roseac$data,train_rosebc$data)
+
+
+
 tuneLen <- 5
 parallelism <- TRUE
 
@@ -62,7 +115,7 @@ for (classifier in classifiers){
   # Predict using test data
   modelfit <- predict.train(model,newdata = testing)
   # Generate confusion matrix for comparison and accuracy
-  cMat <- confusionMatrix(data = modelfit,testing$Dalc)
+  cMat <- caret::confusionMatrix(data = modelfit,testing$Dalc)
   #   model_output[[classifier]] <- list(cMat$overall[1])
   accuracy_df[accuracy_df$model==classifier,"accuracy"] <- round(cMat$overall[1],digits = 3)
   model_output[[classifier]] <- list(unlist(model_output[[classifier]]),cMat$table)
@@ -87,7 +140,14 @@ print(model_output[[best_model]][2])
 # =========================================================================================================
 # Function to build model for selected response variable and type of classifier
 
-buildModel <- function(response,classifier,tuneLen,parallelism){
+buildModel <- function(input){
+  train_data <- input
+  #   One hot enconding for Extreme Gradient Boosting algorithms
+  if(classifier=='xgbLinear'||classifier=='xgbTree'){
+    sparse_matrix <- sparse.model.matrix(Customer.Type~.-1, data = train_data)
+    head(sparse_matrix)
+  }
+  
   if(parallelism==TRUE){
     #   Set up number of parallel executors - Number of cores - 1 (Safety buffer so the machine doesn't hang up)
     cl <- makeCluster(detectCores()-1)
@@ -95,12 +155,18 @@ buildModel <- function(response,classifier,tuneLen,parallelism){
   }
   
   #   Setting train control for 10 fold cross validation
-  train_control <- trainControl(method = "cv",number = 10,savePredictions = TRUE)
+  train_control <- trainControl(method = "cv",number = 10,savePredictions = TRUE,classProbs = TRUE)
   # Set seed to control for resampling and generate reproducible results
   set.seed(seed = 123)
   #   build model on response for selected classifier
-  fmla <- as.formula(paste0(response,"~."))
-  built_model <- train(fmla,data = training,trControl = train_control,method = classifier,tuneLength = tuneLen)
+  #   fmla <- as.formula(paste0(response,"~."))
+  if(classifier=='xgbLinear'||classifier=='xgbTree'){
+    built_model <- train(x = sparse_matrix,y = train_data$Customer.Type,trControl = train_control,
+                         method = classifier,tuneLength = tuneLen)
+  } else{
+    built_model <- train(fmla,data = train_data,trControl = train_control,
+                         method = classifier,tuneLength = tuneLen)
+  }
   if(parallelism==TRUE){
     stopCluster(cl = cl)
   }
