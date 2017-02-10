@@ -1,13 +1,8 @@
-library(MASS)
-library(ggplot2)
-library(plyr)
-library(dplyr)
-library(caret)
-library(doParallel)
-library(Matrix)
-library(ROCR)
-library(ROSE)
-library(DMwR)
+source("./Code/reqd_packages.R")
+pkgs <- c("MASS","ggplot2","dplyr","caret","doParallel","Matrix",
+          "ROCR","ROSE","DMwR")
+# Use sourced script to install and load required packages
+reqd_packages(pkgs)
 
 # Read input
 input <- read.csv(file = "./Data/student/student-mat.csv",header = TRUE,sep = ";")
